@@ -98,23 +98,43 @@ def calculate_rpd_signals(df, config):
         logging.error(f"Error calculating indicators: {e}")
         return None, 0, None
     
-    # --- FIXED FRACTAL LOGIC ---
+    # --- COMPLETELY REWRITTEN FRACTAL LOGIC TO AVOID SERIES AMBIGUITY ---
     n = config['fractalStrength']
-    window_size = 2 * n + 1
     
-    # Calculate fractals using proper boolean operations
-    df['is_fractal_high'] = df['high'] == df['high'].rolling(window_size, center=True).max()
-    df['is_fractal_low'] = df['low'] == df['low'].rolling(window_size, center=True).min()
+    # Ensure we have enough data
+    if len(df) < (2 * n + 3):
+        return None, 0, None
     
-    # Ensure we have enough data for the fractal analysis
+    # Initialize fractal columns
+    df['is_fractal_high'] = False
+    df['is_fractal_low'] = False
+    
+    # Calculate fractals using explicit indexing to avoid Series ambiguity
+    for i in range(n, len(df) - n):
+        # Check for fractal high
+        current_high = df.iloc[i]['high']
+        is_highest = True
+        for j in range(i - n, i + n + 1):
+            if j != i and df.iloc[j]['high'] >= current_high:
+                is_highest = False
+                break
+        df.iloc[i, df.columns.get_loc('is_fractal_high')] = is_highest
+        
+        # Check for fractal low
+        current_low = df.iloc[i]['low']
+        is_lowest = True
+        for j in range(i - n, i + n + 1):
+            if j != i and df.iloc[j]['low'] <= current_low:
+                is_lowest = False
+                break
+        df.iloc[i, df.columns.get_loc('is_fractal_low')] = is_lowest
+    
+    # Get the most recent completed candle that can form a fractal
+    # We need to look back n bars from the end to ensure fractal is complete
     if len(df) < (n + 2):
         return None, 0, None
-    
-    # Get the most recent completed candle data that can form a fractal
-    last_candle_idx = -(n + 1)
-    if abs(last_candle_idx) > len(df):
-        return None, 0, None
         
+    last_candle_idx = len(df) - n - 1
     last_candle = df.iloc[last_candle_idx]
     
     # Check if we have the required RSI column
