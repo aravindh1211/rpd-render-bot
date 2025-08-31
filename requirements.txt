@@ -1,0 +1,6 @@
+python-telegram-bot==13.15
+pandas
+pandas-ta
+yfinance
+numpy==1.26.4
+Flask
