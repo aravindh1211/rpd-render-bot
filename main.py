@@ -1,4 +1,4 @@
-# main.py - RPD Telegram Alert Bot (Render - Final Operational Version v2)
+# main.py - RPD Telegram Alert Bot (Render - Final Operational Version v3)
 import telegram
 import time
 import yfinance as yf
@@ -42,8 +42,8 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 last_signal_timestamp = {asset: None for asset in ASSET_CONFIG}
 session = requests.Session()
 session.headers.update({'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'})
-# --- Use a different exchange that is not blocked ---
-exchange = ccxt.bybit()
+# --- Use a more lenient exchange ---
+exchange = ccxt.gateio()
 
 def send_telegram_alert(message):
     try:
