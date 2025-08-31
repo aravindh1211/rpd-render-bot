@@ -66,8 +66,11 @@ def calculate_rpd_signals(df, config):
     if df.empty or len(df) < config['adaptivePeriod']:
         return None, 0, None
     
-    # Calculate base indicators using pandas-ta
-    df.ta.rsi(length=config['rsiLen'], append=True)
+    # --- THIS IS THE FINAL, ROBUST FIX ---
+    # We explicitly calculate the RSI and assign it to a new column with a dynamic name.
+    # This is more reliable than using append=True.
+    rsi_column_name = f'RSI_{config["rsiLen"]}'
+    df[rsi_column_name] = ta.rsi(df['close'], length=config['rsiLen'])
     
     # Robust Fractal Logic using pandas
     n = config['fractalStrength']
@@ -78,14 +81,12 @@ def calculate_rpd_signals(df, config):
     # Get the specific candle to check for a completed fractal
     candle_to_check = df.iloc[-(n + 1)]
     
-    # --- THIS IS THE DEFINITIVE FIX ---
-    # We get a single value from the candle and explicitly check if it is `True`.
-    # This avoids the "ambiguous" error because we are not checking a whole list.
+    # Get single boolean values to prevent ambiguity errors
     is_high = candle_to_check['is_fractal_high'] == True
     is_low = candle_to_check['is_fractal_low'] == True
-    rsi_value = candle_to_check[f'RSI_{config["rsiLen"]}']
+    rsi_value = candle_to_check[rsi_column_name]
     
-    # Define Signal Conditions with the corrected boolean values
+    # Define Signal Conditions
     is_peak_condition = is_high and rsi_value > config['rsiTop']
     is_valley_condition = is_low and rsi_value < config['rsiBot']
     
