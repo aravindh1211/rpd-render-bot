@@ -69,18 +69,49 @@ def get_yfinance_data(ticker, timeframe):
         return pd.DataFrame()
 
 def calculate_rsi_simple(prices, period=14):
-    """Ultra-simple RSI calculation"""
+    """Ultra-simple RSI calculation using pure Python"""
     try:
-        delta = prices.diff()
-        gain = delta.where(delta > 0, 0).rolling(window=period, min_periods=period).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=period, min_periods=period).mean()
+        price_list = prices.tolist()
+        rsi_values = []
         
-        # Avoid division by zero
-        rs = gain / loss.replace(0, np.nan)
-        rsi = 100 - (100 / (1 + rs))
-        return rsi.fillna(50)  # Fill NaN with neutral RSI
-    except:
-        return pd.Series([50] * len(prices), index=prices.index)
+        for i in range(len(price_list)):
+            if i < period:
+                rsi_values.append(50.0)  # Default RSI for insufficient data
+                continue
+                
+            # Calculate price changes for the period
+            gains = []
+            losses = []
+            
+            for j in range(i - period + 1, i + 1):
+                if j > 0:
+                    change = price_list[j] - price_list[j-1]
+                    if change > 0:
+                        gains.append(change)
+                        losses.append(0)
+                    else:
+                        gains.append(0)
+                        losses.append(abs(change))
+                else:
+                    gains.append(0)
+                    losses.append(0)
+            
+            # Calculate average gain and loss
+            avg_gain = sum(gains) / len(gains) if gains else 0
+            avg_loss = sum(losses) / len(losses) if losses else 0
+            
+            # Calculate RSI
+            if avg_loss == 0:
+                rsi_values.append(100.0)
+            else:
+                rs = avg_gain / avg_loss
+                rsi = 100 - (100 / (1 + rs))
+                rsi_values.append(rsi)
+        
+        return pd.Series(rsi_values, index=prices.index)
+    except Exception as e:
+        # Return neutral RSI values on any error
+        return pd.Series([50.0] * len(prices), index=prices.index)
 
 def find_simple_fractals(highs, lows, strength=2):
     """Simple fractal detection without Series operations"""
@@ -141,17 +172,23 @@ def calculate_rpd_signals(df, config):
         is_fractal_low = fractal_lows[check_idx]
         candle_data = df.iloc[check_idx]
         
-        # Check for signals
-        probability = 85.0  # Simplified probability
+        # Check for signals - CONVERT TO SCALAR VALUES IMMEDIATELY
+        probability = 85.0
         
-        # Peak signal (fractal high + overbought RSI)
-        if is_fractal_high and rsi_value > config['rsiTop']:
-            if probability >= config['minProbThreshold']:
+        # Convert pandas values to pure Python types to avoid Series ambiguity
+        rsi_val = float(rsi_value) if not pd.isna(rsi_value) else 50.0
+        rsi_top = float(config['rsiTop'])
+        rsi_bot = float(config['rsiBot'])
+        min_prob = float(config['minProbThreshold'])
+        
+        # Peak signal (fractal high + overbought RSI) - using pure Python comparisons
+        if is_fractal_high and rsi_val > rsi_top:
+            if probability >= min_prob:
                 return 'peak', probability, candle_data
         
-        # Valley signal (fractal low + oversold RSI)
-        elif is_fractal_low and rsi_value < config['rsiBot']:
-            if probability >= config['minProbThreshold']:
+        # Valley signal (fractal low + oversold RSI) - using pure Python comparisons
+        elif is_fractal_low and rsi_val < rsi_bot:
+            if probability >= min_prob:
                 return 'valley', probability, candle_data
         
         return None, 0, None
