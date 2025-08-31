@@ -1,4 +1,4 @@
-# main.py - RPD Telegram Alert Bot (Render Web Service Version - FINAL)
+# main.py - RPD Telegram Alert Bot (Render Web Service Version - FINAL v2)
 import telegram
 import time
 import yfinance as yf
@@ -10,29 +10,23 @@ from flask import Flask
 from threading import Thread
 
 # --- Web Server for UptimeRobot ---
-# This part of the code creates a simple webpage that UptimeRobot can visit.
 app = Flask('')
 
 @app.route('/')
 def home():
-    # This text will be displayed when UptimeRobot visits the URL.
     return "RPD Alert Bot is alive and running."
 
 def run_flask():
-  # Runs the web server on Render's specified host and port.
   app.run(host='0.0.0.0', port=10000)
 
 def keep_alive():
-    # Starts the web server in a separate thread so it doesn't block the bot logic.
     t = Thread(target=run_flask)
     t.start()
 
 # --- PHASE 1: CONFIGURATION ---
-# Secrets are loaded from Render's Environment Variables
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
 
-# This dictionary holds all the settings from the Pine Script inputs
 ASSET_CONFIG = {
     'NIFTY_50': {
         'ticker': '^NSEI', 'source': 'yfinance', 'timeframe': '15m',
@@ -64,7 +58,8 @@ def send_telegram_alert(message):
         logging.error(f"Failed to send Telegram alert: {e}")
 
 def get_yfinance_data(ticker, timeframe):
-    data = yf.download(tickers=ticker, period='7d', interval=timeframe, progress=False)
+    # Added auto_adjust=True to handle modern yfinance data cleanly
+    data = yf.download(tickers=ticker, period='7d', interval=timeframe, progress=False, auto_adjust=True)
     data.rename(columns={"Open": "open", "High": "high", "Low": "low", "Close": "close", "Volume": "volume"}, inplace=True)
     return data
 
@@ -74,18 +69,18 @@ def calculate_rpd_signals(df, config):
     # Calculate base indicators
     df.ta.rsi(length=config['rsiLen'], append=True)
     df.ta.atr(length=14, append=True)
-    
-    # --- THIS IS THE CORRECTED LINE ---
-    # It now correctly calculates the SMA of the 'volume' column and appends it as 'vol_sma'
     df.ta.sma(close='volume', length=config['volLookback'], col_names=('vol_sma',), append=True)
     
-    # Simplified Fractal Logic
+    # --- THIS IS THE CORRECTED FRACTAL LOGIC ---
+    # This is a much cleaner and more reliable way to find local peaks and valleys.
     n = config['fractalStrength']
-    df['is_fractal_high'] = (df['high'].shift(n) > df['high'].rolling(n*2+1, center=True).max().shift(-n))
-    df['is_fractal_low'] = (df['low'].shift(n) < df['low'].rolling(n*2+1, center=True).min().shift(-n))
+    window_size = 2 * n + 1
+    df['is_fractal_high'] = df['high'] == df['high'].rolling(window_size, center=True).max()
+    df['is_fractal_low'] = df['low'] == df['low'].rolling(window_size, center=True).min()
     
     # Get the most recent completed candle data
-    last_candle = df.iloc[-2]
+    # We look at the candle from n+1 bars ago to allow the fractal to form completely
+    last_candle = df.iloc[-(n + 1)]
     
     # Define Signal Conditions
     is_peak_condition = last_candle['is_fractal_high'] and last_candle[f'RSI_{config["rsiLen"]}'] > config['rsiTop']
@@ -107,10 +102,11 @@ def check_assets():
                 logging.warning(f"No data returned for {asset_name}"); continue
             
             signal_type, prob, candle_data = calculate_rpd_signals(df.copy(), config)
-            current_bar_index = len(df)
-            
-            if signal_type and (current_bar_index > last_signal_bar.get(asset_name, 0) + config['minSignalDistance']):
-                last_signal_bar[asset_name] = current_bar_index
+            # Use candle's name (timestamp) to check for uniqueness
+            current_signal_id = candle_data.name if signal_type else None
+
+            if signal_type and current_signal_id != last_signal_bar.get(asset_name):
+                last_signal_bar[asset_name] = current_signal_id
                 emoji = "🔴" if signal_type == 'peak' else "🟢"
                 signal_text = "PEAK REVERSAL (SHORT)" if signal_type == 'peak' else "VALLEY REVERSAL (LONG)"
                 price = candle_data['close']
@@ -125,7 +121,7 @@ def check_assets():
 
 if __name__ == '__main__':
     keep_alive() # Starts the web server
-    send_telegram_alert("✅ RPD Alert Bot is now online and monitoring assets.")
+    send_telegram_alert("✅ RPD Alert Bot is now LIVE and fully operational!")
     while True:
         try:
             check_assets()
