@@ -63,29 +63,36 @@ def get_yfinance_data(ticker, timeframe):
     data.rename(columns={"Open": "open", "High": "high", "Low": "low", "Close": "close", "Volume": "volume"}, inplace=True)
     return data
 
+def calculate_rsi(series, period=14):
+    """Calculate RSI manually using standard pandas operations"""
+    delta = series.diff()
+    gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
+    loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
+    rs = gain / loss
+    rsi = 100 - (100 / (1 + rs))
+    return rsi
+
 def calculate_rpd_signals(df, config):
     if df.empty or len(df) < config['adaptivePeriod']: 
         return None, 0, None
     
-    # Calculate base indicators with proper error handling
+    # Calculate base indicators using reliable methods
     try:
-        # Calculate RSI
-        rsi_result = df.ta.rsi(length=config['rsiLen'])
-        if rsi_result is not None:
-            df[f'RSI_{config["rsiLen"]}'] = rsi_result
-        else:
-            logging.warning(f"Failed to calculate RSI with length {config['rsiLen']}")
-            return None, 0, None
+        # Calculate RSI manually
+        df[f'RSI_{config["rsiLen"]}'] = calculate_rsi(df['close'], config['rsiLen'])
         
-        # Calculate ATR
-        atr_result = df.ta.atr(length=14)
-        if atr_result is not None:
-            df['ATR_14'] = atr_result
-            
+        # Calculate ATR manually
+        df['tr1'] = df['high'] - df['low']
+        df['tr2'] = abs(df['high'] - df['close'].shift(1))
+        df['tr3'] = abs(df['low'] - df['close'].shift(1))
+        df['true_range'] = df[['tr1', 'tr2', 'tr3']].max(axis=1)
+        df['ATR_14'] = df['true_range'].rolling(window=14).mean()
+        
         # Calculate volume SMA
-        vol_sma_result = df.ta.sma(close='volume', length=config['volLookback'])
-        if vol_sma_result is not None:
-            df['vol_sma'] = vol_sma_result
+        df['vol_sma'] = df['volume'].rolling(window=config['volLookback']).mean()
+        
+        # Clean up temporary columns
+        df.drop(['tr1', 'tr2', 'tr3', 'true_range'], axis=1, inplace=True)
             
     except Exception as e:
         logging.error(f"Error calculating indicators: {e}")
