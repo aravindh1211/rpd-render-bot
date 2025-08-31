@@ -1,4 +1,4 @@
-# main.py - RPD Telegram Alert Bot (Render Web Service - Final Corrected Version)
+# main.py - RPD Telegram Alert Bot (Render Web Service - Final Corrected Version v2)
 import telegram
 import time
 import yfinance as yf
@@ -66,13 +66,11 @@ def calculate_rpd_signals(df, config):
     if df.empty or len(df) < config['adaptivePeriod']:
         return None, 0, None
     
-    # --- THIS IS THE FINAL, ROBUST FIX ---
-    # We explicitly calculate the RSI and assign it to a new column with a dynamic name.
-    # This is more reliable than using append=True.
+    # Explicitly calculate RSI and assign it to a new column
     rsi_column_name = f'RSI_{config["rsiLen"]}'
     df[rsi_column_name] = ta.rsi(df['close'], length=config['rsiLen'])
     
-    # Robust Fractal Logic using pandas
+    # Robust Fractal Logic
     n = config['fractalStrength']
     window_size = 2 * n + 1
     df['is_fractal_high'] = df['high'] == df['high'].rolling(window_size, center=True).max()
@@ -81,12 +79,18 @@ def calculate_rpd_signals(df, config):
     # Get the specific candle to check for a completed fractal
     candle_to_check = df.iloc[-(n + 1)]
     
-    # Get single boolean values to prevent ambiguity errors
-    is_high = candle_to_check['is_fractal_high'] == True
-    is_low = candle_to_check['is_fractal_low'] == True
-    rsi_value = candle_to_check[rsi_column_name]
-    
-    # Define Signal Conditions
+    # --- THE BULLETPROOF FIX ---
+    # We use .item() to extract the values as native Python types (bool, float).
+    # This completely prevents the "ambiguous" error. A try/except block handles edge cases.
+    try:
+        is_high = bool(candle_to_check['is_fractal_high'].item())
+        is_low = bool(candle_to_check['is_fractal_low'].item())
+        rsi_value = float(candle_to_check[rsi_column_name].item())
+    except (ValueError, AttributeError):
+        # If any value is NaN or invalid, default to a non-signaling state
+        return None, 0, None
+
+    # Define Signal Conditions using the clean, native Python variables
     is_peak_condition = is_high and rsi_value > config['rsiTop']
     is_valley_condition = is_low and rsi_value < config['rsiBot']
     
