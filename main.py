@@ -1,4 +1,4 @@
-# main.py - RPD Telegram Alert Bot (Render - Final Operational Version with CCXT)
+# main.py - RPD Telegram Alert Bot (Render - Final Operational Version v2)
 import telegram
 import time
 import yfinance as yf
@@ -7,7 +7,7 @@ import pandas_ta as ta
 import logging
 import os
 import requests
-import ccxt # Import the new library
+import ccxt
 from flask import Flask
 from threading import Thread
 
@@ -26,8 +26,8 @@ def keep_alive():
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
 ASSET_CONFIG = {
-    'RELIANCE': {
-        'ticker': 'RELIANCE.NS', 'source': 'yfinance', 'timeframe': '15m',
+    'MICROSOFT': {
+        'ticker': 'MSFT', 'source': 'yfinance', 'timeframe': '15m',
         'fractalStrength': 2, 'rsiLen': 17, 'rsiTop': 65, 'rsiBot': 40
     },
     'BITCOIN': {
@@ -42,7 +42,8 @@ logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s
 last_signal_timestamp = {asset: None for asset in ASSET_CONFIG}
 session = requests.Session()
 session.headers.update({'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'})
-exchange = ccxt.binance() # Initialize the CCXT exchange connection
+# --- Use a different exchange that is not blocked ---
+exchange = ccxt.bybit()
 
 def send_telegram_alert(message):
     try:
@@ -62,13 +63,10 @@ def get_yfinance_data(ticker, timeframe, session):
         logging.error(f"Error fetching yfinance data for {ticker}: {e}")
         return pd.DataFrame()
 
-# --- New function for the reliable crypto data source ---
 def get_ccxt_data(ticker, timeframe):
     try:
-        # Fetch OHLCV (Open, High, Low, Close, Volume) data from the exchange
         ohlcv = exchange.fetch_ohlcv(ticker, timeframe, limit=200)
         df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-        # Convert timestamp to a readable datetime format
         df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
         df.set_index('timestamp', inplace=True)
         return df
@@ -110,9 +108,8 @@ def calculate_rpd_signals(df, config):
 def check_assets():
     for asset_name, config in ASSET_CONFIG.items():
         logging.info(f"--- Checking {asset_name} ({config['ticker']}) on {config['timeframe']} ---")
-        df = pd.DataFrame() # Create an empty dataframe by default
+        df = pd.DataFrame()
         try:
-            # --- Logic to choose the correct data source ---
             if config['source'] == 'yfinance':
                 df = get_yfinance_data(config['ticker'], config['timeframe'], session)
             elif config['source'] == 'ccxt':
