@@ -1,4 +1,4 @@
-# main.py - RPD Telegram Alert Bot (Render - The Final Operational Version)
+# main.py - RPD Telegram Alert Bot (Render - Final Operational Version with CCXT)
 import telegram
 import time
 import yfinance as yf
@@ -7,6 +7,7 @@ import pandas_ta as ta
 import logging
 import os
 import requests
+import ccxt # Import the new library
 from flask import Flask
 from threading import Thread
 
@@ -26,11 +27,11 @@ TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
 ASSET_CONFIG = {
     'RELIANCE': {
-        'ticker': 'RELIANCE.NS', 'timeframe': '15m',
+        'ticker': 'RELIANCE.NS', 'source': 'yfinance', 'timeframe': '15m',
         'fractalStrength': 2, 'rsiLen': 17, 'rsiTop': 65, 'rsiBot': 40
     },
     'BITCOIN': {
-        'ticker': 'BTC-USD', 'timeframe': '5m',
+        'ticker': 'BTC/USDT', 'source': 'ccxt', 'timeframe': '1h',
         'fractalStrength': 2, 'rsiLen': 14, 'rsiTop': 70, 'rsiBot': 30
     },
 }
@@ -39,10 +40,9 @@ ASSET_CONFIG = {
 bot = telegram.Bot(token=TELEGRAM_BOT_TOKEN)
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 last_signal_timestamp = {asset: None for asset in ASSET_CONFIG}
-
-# Create a session that looks like a browser to prevent blocking
 session = requests.Session()
 session.headers.update({'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'})
+exchange = ccxt.binance() # Initialize the CCXT exchange connection
 
 def send_telegram_alert(message):
     try:
@@ -51,22 +51,30 @@ def send_telegram_alert(message):
     except Exception as e:
         logging.error(f"Failed to send Telegram alert: {e}")
 
-# --- THIS IS THE NEW, MORE ROBUST DATA FETCHING FUNCTION ---
 def get_yfinance_data(ticker, timeframe, session):
     try:
-        # Use the Ticker object, which is more reliable on servers
         tkr = yf.Ticker(ticker, session=session)
         data = tkr.history(period="7d", interval=timeframe, auto_adjust=True)
-        if data.empty:
-            logging.warning(f"No data returned for {ticker} using Ticker.history()")
-            return pd.DataFrame()
-        # The column names from .history() are capitalized, so we make them lowercase
+        if data.empty: return pd.DataFrame()
         data.rename(columns={"Open": "open", "High": "high", "Low": "low", "Close": "close", "Volume": "volume"}, inplace=True)
         return data.dropna()
     except Exception as e:
-        logging.error(f"Critical error fetching data for {ticker}: {e}")
+        logging.error(f"Error fetching yfinance data for {ticker}: {e}")
         return pd.DataFrame()
 
+# --- New function for the reliable crypto data source ---
+def get_ccxt_data(ticker, timeframe):
+    try:
+        # Fetch OHLCV (Open, High, Low, Close, Volume) data from the exchange
+        ohlcv = exchange.fetch_ohlcv(ticker, timeframe, limit=200)
+        df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+        # Convert timestamp to a readable datetime format
+        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+        df.set_index('timestamp', inplace=True)
+        return df
+    except Exception as e:
+        logging.error(f"Error fetching ccxt data for {ticker}: {e}")
+        return pd.DataFrame()
 
 def calculate_rpd_signals(df, config):
     if df.empty or len(df) < 50: return None, 0, None
@@ -102,8 +110,14 @@ def calculate_rpd_signals(df, config):
 def check_assets():
     for asset_name, config in ASSET_CONFIG.items():
         logging.info(f"--- Checking {asset_name} ({config['ticker']}) on {config['timeframe']} ---")
+        df = pd.DataFrame() # Create an empty dataframe by default
         try:
-            df = get_yfinance_data(config['ticker'], config['timeframe'], session)
+            # --- Logic to choose the correct data source ---
+            if config['source'] == 'yfinance':
+                df = get_yfinance_data(config['ticker'], config['timeframe'], session)
+            elif config['source'] == 'ccxt':
+                df = get_ccxt_data(config['ticker'], config['timeframe'])
+
             if df.empty:
                 logging.warning(f"Skipping check for {asset_name} due to no data."); continue
             
@@ -143,4 +157,3 @@ if __name__ == '__main__':
             logging.critical(f"A critical error occurred in the main loop: {e}")
             send_telegram_alert(f"🚨 BOT ERROR: {e}. Restarting in 60s.")
             time.sleep(60)
-
