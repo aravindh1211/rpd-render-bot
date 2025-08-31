@@ -25,12 +25,12 @@ def keep_alive():
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
 ASSET_CONFIG = {
-    'NIFTY_50': {
-        'ticker': '^NSEI', 'timeframe': '15m',
+    'RELIANCE': {
+        'ticker': 'RELIANCE.NS', 'timeframe': '15m',
         'fractalStrength': 2, 'rsiLen': 17, 'rsiTop': 65, 'rsiBot': 40
     },
     'BITCOIN': {
-        'ticker': 'BTC-USD', 'timeframe': '1h',
+        'ticker': 'BTC-USD', 'timeframe': '5m',
         'fractalStrength': 2, 'rsiLen': 14, 'rsiTop': 70, 'rsiBot': 30
     },
 }
@@ -143,3 +143,4 @@ if __name__ == '__main__':
             logging.critical(f"A critical error occurred in the main loop: {e}")
             send_telegram_alert(f"🚨 BOT ERROR: {e}. Restarting in 60s.")
             time.sleep(60)
+
