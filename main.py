@@ -67,10 +67,29 @@ def calculate_rpd_signals(df, config):
     if df.empty or len(df) < config['adaptivePeriod']: 
         return None, 0, None
     
-    # Calculate base indicators
-    df.ta.rsi(length=config['rsiLen'], append=True)
-    df.ta.atr(length=14, append=True)
-    df.ta.sma(close='volume', length=config['volLookback'], col_names=('vol_sma',), append=True)
+    # Calculate base indicators with proper error handling
+    try:
+        # Calculate RSI
+        rsi_result = df.ta.rsi(length=config['rsiLen'])
+        if rsi_result is not None:
+            df[f'RSI_{config["rsiLen"]}'] = rsi_result
+        else:
+            logging.warning(f"Failed to calculate RSI with length {config['rsiLen']}")
+            return None, 0, None
+        
+        # Calculate ATR
+        atr_result = df.ta.atr(length=14)
+        if atr_result is not None:
+            df['ATR_14'] = atr_result
+            
+        # Calculate volume SMA
+        vol_sma_result = df.ta.sma(close='volume', length=config['volLookback'])
+        if vol_sma_result is not None:
+            df['vol_sma'] = vol_sma_result
+            
+    except Exception as e:
+        logging.error(f"Error calculating indicators: {e}")
+        return None, 0, None
     
     # --- FIXED FRACTAL LOGIC ---
     n = config['fractalStrength']
@@ -93,8 +112,8 @@ def calculate_rpd_signals(df, config):
     
     # Check if we have the required RSI column
     rsi_column = f'RSI_{config["rsiLen"]}'
-    if rsi_column not in df.columns:
-        logging.warning(f"RSI column {rsi_column} not found in data")
+    if rsi_column not in df.columns or df[rsi_column].isna().all():
+        logging.warning(f"RSI column {rsi_column} not found or all NaN values in data")
         return None, 0, None
     
     # Get RSI value and handle potential NaN
