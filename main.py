@@ -1,4 +1,4 @@
-# main.py - RPD Telegram Alert Bot (Render Web Service - Final Corrected Version v2)
+# main.py - RPD Telegram Alert Bot (Render Web Service - Final Corrected Version v3)
 import telegram
 import time
 import yfinance as yf
@@ -31,14 +31,12 @@ ASSET_CONFIG = {
     'NIFTY_50': {
         'ticker': '^NSEI', 'source': 'yfinance', 'timeframe': '15m',
         'adaptivePeriod': 25, 'fractalStrength': 2, 'minProbThreshold': 70,
-        'rsiLen': 17, 'rsiTop': 65, 'rsiBot': 40,
-        'volLookback': 17
+        'rsiLen': 17, 'rsiTop': 65, 'rsiBot': 40
     },
     'BITCOIN': {
         'ticker': 'BTC-USD', 'source': 'yfinance', 'timeframe': '1h',
         'adaptivePeriod': 20, 'fractalStrength': 2, 'minProbThreshold': 65,
-        'rsiLen': 14, 'rsiTop': 70, 'rsiBot': 30,
-        'volLookback': 20
+        'rsiLen': 14, 'rsiTop': 70, 'rsiBot': 30
     },
 }
    
@@ -79,16 +77,18 @@ def calculate_rpd_signals(df, config):
     # Get the specific candle to check for a completed fractal
     candle_to_check = df.iloc[-(n + 1)]
     
-    # --- THE BULLETPROOF FIX ---
-    # We use .item() to extract the values as native Python types (bool, float).
-    # This completely prevents the "ambiguous" error. A try/except block handles edge cases.
-    try:
-        is_high = bool(candle_to_check['is_fractal_high'].item())
-        is_low = bool(candle_to_check['is_fractal_low'].item())
-        rsi_value = float(candle_to_check[rsi_column_name].item())
-    except (ValueError, AttributeError):
-        # If any value is NaN or invalid, default to a non-signaling state
+    # --- THE FINAL BULLETPROOF FIX ---
+    # First, get the RSI value from the specific candle.
+    rsi_value_from_candle = candle_to_check[rsi_column_name]
+
+    # Now, check if this value is NaN (Not a Number). If it is, exit immediately.
+    if pd.isna(rsi_value_from_candle):
         return None, 0, None
+
+    # If the RSI value is a valid number, we can safely proceed.
+    is_high = bool(candle_to_check['is_fractal_high'])
+    is_low = bool(candle_to_check['is_fractal_low'])
+    rsi_value = float(rsi_value_from_candle)
 
     # Define Signal Conditions using the clean, native Python variables
     is_peak_condition = is_high and rsi_value > config['rsiTop']
