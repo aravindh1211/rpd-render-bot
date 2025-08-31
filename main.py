@@ -1,4 +1,4 @@
-# main.py - RPD Telegram Alert Bot (Render - Final Operational Version)
+# main.py - RPD Telegram Alert Bot (Render - The Final Operational Version)
 import telegram
 import time
 import yfinance as yf
@@ -40,7 +40,7 @@ bot = telegram.Bot(token=TELEGRAM_BOT_TOKEN)
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 last_signal_timestamp = {asset: None for asset in ASSET_CONFIG}
 
-# --- THIS IS THE FIX: Create a session that looks like a browser ---
+# Create a session that looks like a browser to prevent blocking
 session = requests.Session()
 session.headers.update({'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'})
 
@@ -51,12 +51,22 @@ def send_telegram_alert(message):
     except Exception as e:
         logging.error(f"Failed to send Telegram alert: {e}")
 
+# --- THIS IS THE NEW, MORE ROBUST DATA FETCHING FUNCTION ---
 def get_yfinance_data(ticker, timeframe, session):
-    # We pass the session into yfinance to make requests look like a browser
-    data = yf.download(tickers=ticker, period='7d', interval=timeframe, progress=False, auto_adjust=True, session=session)
-    if data.empty: return pd.DataFrame()
-    data.rename(columns={"Open": "open", "High": "high", "Low": "low", "Close": "close", "Volume": "volume"}, inplace=True)
-    return data.dropna()
+    try:
+        # Use the Ticker object, which is more reliable on servers
+        tkr = yf.Ticker(ticker, session=session)
+        data = tkr.history(period="7d", interval=timeframe, auto_adjust=True)
+        if data.empty:
+            logging.warning(f"No data returned for {ticker} using Ticker.history()")
+            return pd.DataFrame()
+        # The column names from .history() are capitalized, so we make them lowercase
+        data.rename(columns={"Open": "open", "High": "high", "Low": "low", "Close": "close", "Volume": "volume"}, inplace=True)
+        return data.dropna()
+    except Exception as e:
+        logging.error(f"Critical error fetching data for {ticker}: {e}")
+        return pd.DataFrame()
+
 
 def calculate_rpd_signals(df, config):
     if df.empty or len(df) < 50: return None, 0, None
@@ -93,10 +103,9 @@ def check_assets():
     for asset_name, config in ASSET_CONFIG.items():
         logging.info(f"--- Checking {asset_name} ({config['ticker']}) on {config['timeframe']} ---")
         try:
-            # We now pass the session to the data fetching function
             df = get_yfinance_data(config['ticker'], config['timeframe'], session)
             if df.empty:
-                logging.warning(f"No data for {asset_name}"); continue
+                logging.warning(f"Skipping check for {asset_name} due to no data."); continue
             
             signal_type, prob, candle_data = calculate_rpd_signals(df.copy(), config)
             
@@ -117,7 +126,7 @@ def check_assets():
             else: 
                 logging.info(f"No new signal for {asset_name}.")
         except Exception as e: 
-            logging.error(f"An error occurred while checking {asset_name}: {e}")
+            logging.error(f"An error occurred in check_assets for {asset_name}: {e}")
         time.sleep(3)
 
 if __name__ == '__main__':
