@@ -1,4 +1,4 @@
-# main.py - RPD Telegram Alert Bot (Render - The Final Version)
+# main.py - RPD Telegram Alert Bot (Render - Final Operational Version)
 import telegram
 import time
 import yfinance as yf
@@ -6,6 +6,7 @@ import pandas as pd
 import pandas_ta as ta
 import logging
 import os
+import requests
 from flask import Flask
 from threading import Thread
 
@@ -39,6 +40,10 @@ bot = telegram.Bot(token=TELEGRAM_BOT_TOKEN)
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
 last_signal_timestamp = {asset: None for asset in ASSET_CONFIG}
 
+# --- THIS IS THE FIX: Create a session that looks like a browser ---
+session = requests.Session()
+session.headers.update({'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'})
+
 def send_telegram_alert(message):
     try:
         bot.send_message(chat_id=TELEGRAM_CHAT_ID, text=message, parse_mode='Markdown')
@@ -46,8 +51,9 @@ def send_telegram_alert(message):
     except Exception as e:
         logging.error(f"Failed to send Telegram alert: {e}")
 
-def get_yfinance_data(ticker, timeframe):
-    data = yf.download(tickers=ticker, period='7d', interval=timeframe, progress=False, auto_adjust=True)
+def get_yfinance_data(ticker, timeframe, session):
+    # We pass the session into yfinance to make requests look like a browser
+    data = yf.download(tickers=ticker, period='7d', interval=timeframe, progress=False, auto_adjust=True, session=session)
     if data.empty: return pd.DataFrame()
     data.rename(columns={"Open": "open", "High": "high", "Low": "low", "Close": "close", "Volume": "volume"}, inplace=True)
     return data.dropna()
@@ -55,7 +61,6 @@ def get_yfinance_data(ticker, timeframe):
 def calculate_rpd_signals(df, config):
     if df.empty or len(df) < 50: return None, 0, None
     
-    # Calculate Indicators
     rsi_col = f"RSI_{config['rsiLen']}"
     df[rsi_col] = ta.rsi(df['close'], length=config['rsiLen'])
     
@@ -64,26 +69,17 @@ def calculate_rpd_signals(df, config):
     df['is_fractal_high'] = df['high'] == df['high'].rolling(win, center=True).max()
     df['is_fractal_low'] = df['low'] == df['low'].rolling(win, center=True).min()
     
-    # --- THIS IS THE DEFINITIVE FIX ---
-    # We will look at the last fully formed candle directly.
-    # .iloc[-N] accesses the Nth-to-last item. This returns a single, unambiguous value.
     try:
         candle_pos = -(n + 1)
-        
         rsi_value = df[rsi_col].iloc[candle_pos]
         is_high = df['is_fractal_high'].iloc[candle_pos]
         is_low = df['is_fractal_low'].iloc[candle_pos]
         candle_data = df.iloc[candle_pos]
-
-        # Check for NaN (Not a Number) which happens at the start of calculations
-        if pd.isna(rsi_value):
-            return None, 0, None
-
+        
+        if pd.isna(rsi_value): return None, 0, None
     except IndexError:
-        # This happens if the dataframe is too small, a safe exit.
         return None, 0, None
 
-    # Now we have simple Python types, so there is no ambiguity.
     is_peak_condition = is_high and rsi_value > config['rsiTop']
     is_valley_condition = is_low and rsi_value < config['rsiBot']
     
@@ -97,7 +93,8 @@ def check_assets():
     for asset_name, config in ASSET_CONFIG.items():
         logging.info(f"--- Checking {asset_name} ({config['ticker']}) on {config['timeframe']} ---")
         try:
-            df = get_yfinance_data(config['ticker'], config['timeframe'])
+            # We now pass the session to the data fetching function
+            df = get_yfinance_data(config['ticker'], config['timeframe'], session)
             if df.empty:
                 logging.warning(f"No data for {asset_name}"); continue
             
