@@ -1,4 +1,4 @@
-# main.py - RPD Telegram Alert Bot (Render Web Service Version)
+# main.py - RPD Telegram Alert Bot (Render Web Service Version - FINAL)
 import telegram
 import time
 import yfinance as yf
@@ -28,7 +28,7 @@ def keep_alive():
     t.start()
 
 # --- PHASE 1: CONFIGURATION ---
-# Secrets will be loaded from Render's Environment Variables
+# Secrets are loaded from Render's Environment Variables
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
 
@@ -70,16 +70,30 @@ def get_yfinance_data(ticker, timeframe):
 
 def calculate_rpd_signals(df, config):
     if df.empty or len(df) < config['adaptivePeriod']: return None, 0, None
+    
+    # Calculate base indicators
     df.ta.rsi(length=config['rsiLen'], append=True)
     df.ta.atr(length=14, append=True)
-    df['vol_sma'] = df.ta.sma(close=df['volume'], length=config['volLookback'])
+    
+    # --- THIS IS THE CORRECTED LINE ---
+    # It now correctly calculates the SMA of the 'volume' column and appends it as 'vol_sma'
+    df.ta.sma(close='volume', length=config['volLookback'], col_names=('vol_sma',), append=True)
+    
+    # Simplified Fractal Logic
     n = config['fractalStrength']
     df['is_fractal_high'] = (df['high'].shift(n) > df['high'].rolling(n*2+1, center=True).max().shift(-n))
     df['is_fractal_low'] = (df['low'].shift(n) < df['low'].rolling(n*2+1, center=True).min().shift(-n))
+    
+    # Get the most recent completed candle data
     last_candle = df.iloc[-2]
+    
+    # Define Signal Conditions
     is_peak_condition = last_candle['is_fractal_high'] and last_candle[f'RSI_{config["rsiLen"]}'] > config['rsiTop']
     is_valley_condition = last_candle['is_fractal_low'] and last_candle[f'RSI_{config["rsiLen"]}'] < config['rsiBot']
+    
+    # Placeholder for the complex probability calculation
     probability = 85.0 
+    
     if is_peak_condition and probability >= config['minProbThreshold']: return 'peak', probability, last_candle
     elif is_valley_condition and probability >= config['minProbThreshold']: return 'valley', probability, last_candle
     else: return None, 0, None
@@ -91,8 +105,10 @@ def check_assets():
             df = get_yfinance_data(config['ticker'], config['timeframe'])
             if df.empty:
                 logging.warning(f"No data returned for {asset_name}"); continue
+            
             signal_type, prob, candle_data = calculate_rpd_signals(df.copy(), config)
             current_bar_index = len(df)
+            
             if signal_type and (current_bar_index > last_signal_bar.get(asset_name, 0) + config['minSignalDistance']):
                 last_signal_bar[asset_name] = current_bar_index
                 emoji = "🔴" if signal_type == 'peak' else "🟢"
