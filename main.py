@@ -1,4 +1,4 @@
-# main.py - RPD Telegram Alert Bot (Render Web Service - Final Corrected Version v3)
+# main.py - RPD Telegram Alert Bot (Render - The Final Version)
 import telegram
 import time
 import yfinance as yf
@@ -11,14 +11,11 @@ from threading import Thread
 
 # --- Web Server for UptimeRobot ---
 app = Flask('')
-
 @app.route('/')
 def home():
     return "RPD Alert Bot is alive and running."
-
 def run_flask():
   app.run(host='0.0.0.0', port=10000)
-
 def keep_alive():
     t = Thread(target=run_flask)
     t.start()
@@ -26,24 +23,20 @@ def keep_alive():
 # --- Configuration ---
 TELEGRAM_BOT_TOKEN = os.environ.get('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
-
 ASSET_CONFIG = {
     'NIFTY_50': {
-        'ticker': '^NSEI', 'source': 'yfinance', 'timeframe': '15m',
-        'adaptivePeriod': 25, 'fractalStrength': 2, 'minProbThreshold': 70,
-        'rsiLen': 17, 'rsiTop': 65, 'rsiBot': 40
+        'ticker': '^NSEI', 'timeframe': '15m',
+        'fractalStrength': 2, 'rsiLen': 17, 'rsiTop': 65, 'rsiBot': 40
     },
     'BITCOIN': {
-        'ticker': 'BTC-USD', 'source': 'yfinance', 'timeframe': '1h',
-        'adaptivePeriod': 20, 'fractalStrength': 2, 'minProbThreshold': 65,
-        'rsiLen': 14, 'rsiTop': 70, 'rsiBot': 30
+        'ticker': 'BTC-USD', 'timeframe': '1h',
+        'fractalStrength': 2, 'rsiLen': 14, 'rsiTop': 70, 'rsiBot': 30
     },
 }
    
 # --- Initialization ---
 bot = telegram.Bot(token=TELEGRAM_BOT_TOKEN)
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
-
 last_signal_timestamp = {asset: None for asset in ASSET_CONFIG}
 
 def send_telegram_alert(message):
@@ -55,53 +48,50 @@ def send_telegram_alert(message):
 
 def get_yfinance_data(ticker, timeframe):
     data = yf.download(tickers=ticker, period='7d', interval=timeframe, progress=False, auto_adjust=True)
-    if data.empty:
-        return pd.DataFrame()
+    if data.empty: return pd.DataFrame()
     data.rename(columns={"Open": "open", "High": "high", "Low": "low", "Close": "close", "Volume": "volume"}, inplace=True)
     return data.dropna()
 
 def calculate_rpd_signals(df, config):
-    if df.empty or len(df) < config['adaptivePeriod']:
-        return None, 0, None
+    if df.empty or len(df) < 50: return None, 0, None
     
-    # Explicitly calculate RSI and assign it to a new column
-    rsi_column_name = f'RSI_{config["rsiLen"]}'
-    df[rsi_column_name] = ta.rsi(df['close'], length=config['rsiLen'])
+    # Calculate Indicators
+    rsi_col = f"RSI_{config['rsiLen']}"
+    df[rsi_col] = ta.rsi(df['close'], length=config['rsiLen'])
     
-    # Robust Fractal Logic
     n = config['fractalStrength']
-    window_size = 2 * n + 1
-    df['is_fractal_high'] = df['high'] == df['high'].rolling(window_size, center=True).max()
-    df['is_fractal_low'] = df['low'] == df['low'].rolling(window_size, center=True).min()
+    win = 2 * n + 1
+    df['is_fractal_high'] = df['high'] == df['high'].rolling(win, center=True).max()
+    df['is_fractal_low'] = df['low'] == df['low'].rolling(win, center=True).min()
     
-    # Get the specific candle to check for a completed fractal
-    candle_to_check = df.iloc[-(n + 1)]
-    
-    # --- THE FINAL BULLETPROOF FIX ---
-    # First, get the RSI value from the specific candle.
-    rsi_value_from_candle = candle_to_check[rsi_column_name]
+    # --- THIS IS THE DEFINITIVE FIX ---
+    # We will look at the last fully formed candle directly.
+    # .iloc[-N] accesses the Nth-to-last item. This returns a single, unambiguous value.
+    try:
+        candle_pos = -(n + 1)
+        
+        rsi_value = df[rsi_col].iloc[candle_pos]
+        is_high = df['is_fractal_high'].iloc[candle_pos]
+        is_low = df['is_fractal_low'].iloc[candle_pos]
+        candle_data = df.iloc[candle_pos]
 
-    # Now, check if this value is NaN (Not a Number). If it is, exit immediately.
-    if pd.isna(rsi_value_from_candle):
+        # Check for NaN (Not a Number) which happens at the start of calculations
+        if pd.isna(rsi_value):
+            return None, 0, None
+
+    except IndexError:
+        # This happens if the dataframe is too small, a safe exit.
         return None, 0, None
 
-    # If the RSI value is a valid number, we can safely proceed.
-    is_high = bool(candle_to_check['is_fractal_high'])
-    is_low = bool(candle_to_check['is_fractal_low'])
-    rsi_value = float(rsi_value_from_candle)
-
-    # Define Signal Conditions using the clean, native Python variables
+    # Now we have simple Python types, so there is no ambiguity.
     is_peak_condition = is_high and rsi_value > config['rsiTop']
     is_valley_condition = is_low and rsi_value < config['rsiBot']
     
-    probability = 85.0  # Placeholder probability
+    probability = 85.0
     
-    if is_peak_condition:
-        return 'peak', probability, candle_to_check
-    elif is_valley_condition:
-        return 'valley', probability, candle_to_check
-    else:
-        return None, 0, None
+    if is_peak_condition: return 'peak', probability, candle_data
+    elif is_valley_condition: return 'valley', probability, candle_data
+    else: return None, 0, None
 
 def check_assets():
     for asset_name, config in ASSET_CONFIG.items():
@@ -109,7 +99,7 @@ def check_assets():
         try:
             df = get_yfinance_data(config['ticker'], config['timeframe'])
             if df.empty:
-                logging.warning(f"No data returned for {asset_name}"); continue
+                logging.warning(f"No data for {asset_name}"); continue
             
             signal_type, prob, candle_data = calculate_rpd_signals(df.copy(), config)
             
@@ -123,7 +113,7 @@ def check_assets():
                     message = (f"{emoji} *RPD Signal Detected* {emoji}\n\n"
                                f"*Asset:* {asset_name} ({config['ticker']})\n*Timeframe:* {config['timeframe']}\n"
                                f"*Signal:* {signal_text}\n*Price:* `{price:.4f}`\n"
-                               f"*Probability:* `{prob:.2f}%` (Simplified)\n\nCheck chart for confirmation.")
+                               f"*Probability:* `{prob:.2f}%` (Simplified)")
                     send_telegram_alert(message)
                 else:
                     logging.info(f"Signal for {asset_name} on {signal_timestamp} already sent.")
@@ -142,8 +132,7 @@ if __name__ == '__main__':
             logging.info("Cycle complete. Waiting for 5 minutes...")
             time.sleep(300)
         except KeyboardInterrupt: 
-            print("Bot stopped by user.")
-            break
+            print("Bot stopped by user."); break
         except Exception as e:
             logging.critical(f"A critical error occurred in the main loop: {e}")
             send_telegram_alert(f"🚨 BOT ERROR: {e}. Restarting in 60s.")
